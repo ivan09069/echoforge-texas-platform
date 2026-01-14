@@ -1,0 +1,23 @@
+{
+  "name": "echoforge-pipe-token",
+  "version": "1.0.0",
+  "description": "PIPE Token - Pipeline Capacity Rights Token for EchoForge Texas Energy Platform",
+  "author": "Ivan Torres / EchoForge Studios",
+  "license": "MIT",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:local": "hardhat run scripts/deploy.js --network hardhat",
+    "deploy:testnet": "hardhat run scripts/deploy.js --network baseSepolia",
+    "deploy:mainnet": "hardhat run scripts/deploy.js --network base",
+    "verify": "hardhat verify --network base",
+    "clean": "hardhat clean",
+    "coverage": "hardhat coverage"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@openzeppelin/contracts": "^5.0.1",
+    "dotenv": "^16.3.1",
+    "hardhat": "^2.19.4"
+  }
+}
