@@ -6,33 +6,18 @@
   "license": "MIT",
   "scripts": {
     "compile": "hardhat compile",
-    "test": "hardhat test --config hardhat.security.config.js",
+    "test": "hardhat test",
     "deploy:local": "hardhat run scripts/deploy.js --network hardhat",
     "deploy:testnet": "hardhat run scripts/deploy.js --network baseSepolia",
     "deploy:mainnet": "hardhat run scripts/deploy.js --network base",
     "verify": "hardhat verify --network base",
     "clean": "hardhat clean",
-    "coverage": "hardhat test --config hardhat.security.config.js --coverage",
-    "test:security": "hardhat test --config hardhat.security.config.js"
+    "coverage": "hardhat coverage"
   },
   "devDependencies": {
-    "@openzeppelin/contracts": "5.6.1",
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@openzeppelin/contracts": "^5.0.1",
     "dotenv": "^16.3.1",
-    "hardhat": "3.16.0",
-    "solc": "0.8.37",
-    "@nomicfoundation/hardhat-toolbox-mocha-ethers": "3.0.7"
-  },
-  "type": "module",
-  "engines": {
-    "node": ">=24.0.0"
-  },
-  "overrides": {
-    "solc": {
-      "tmp": "0.2.7"
-    },
-    "mocha": {
-      "diff": "8.0.3",
-      "serialize-javascript": "7.0.5"
-    }
+    "hardhat": "^2.19.4"
   }
 }

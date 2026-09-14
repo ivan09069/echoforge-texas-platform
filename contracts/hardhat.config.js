@@ -1,34 +1,73 @@
-import "dotenv/config";
-import { createRequire } from "node:module";
-import { defineConfig } from "hardhat/config";
-import toolbox from "@nomicfoundation/hardhat-toolbox-mocha-ethers";
-const require = createRequire(import.meta.url);
+require("@nomicfoundation/hardhat-toolbox");
+require("dotenv").config();
 
-export default defineConfig({
-  plugins: [toolbox, {
-    id: "pipe-root-source",
-    hookHandlers: { solidity: () => import("./root-source-hooks.js") },
-  }],
+/** @type import('hardhat/config').HardhatUserConfig */
+module.exports = {
   solidity: {
-    version: "0.8.37",
-    path: require.resolve("solc/soljson.js"),
-    preferWasm: true,
-    settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true, evmVersion: "cancun" },
+    version: "0.8.20",
+    settings: {
+      optimizer: {
+        enabled: true,
+        runs: 200,
+      },
+      viaIR: true,
+    },
   },
-  paths: { sources: ["./src"], tests: { mocha: "./test" } },
   networks: {
-    hardhat: { type: "edr-simulated", chainType: "l1", chainId: 31337, hardfork: "cancun" },
+    // Base Mainnet
     base: {
-      type: "http", chainType: "op", chainId: 8453,
       url: process.env.BASE_RPC_URL || "https://mainnet.base.org",
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      chainId: 8453,
+      gasPrice: "auto",
     },
+    // Base Sepolia Testnet
     baseSepolia: {
-      type: "http", chainType: "op", chainId: 84532,
       url: process.env.BASE_SEPOLIA_RPC_URL || "https://sepolia.base.org",
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      chainId: 84532,
+      gasPrice: "auto",
+    },
+    // Local development
+    hardhat: {
+      chainId: 31337,
+      forking: {
+        url: process.env.BASE_RPC_URL || "https://mainnet.base.org",
+        enabled: process.env.FORK_ENABLED === "true",
+      },
     },
   },
-  verify: { etherscan: { apiKey: process.env.ETHERSCAN_API_KEY || process.env.BASESCAN_API_KEY || "" } },
-  test: { mocha: { timeout: 40000 } },
-});
+  etherscan: {
+    apiKey: {
+      base: process.env.BASESCAN_API_KEY || "",
+      baseSepolia: process.env.BASESCAN_API_KEY || "",
+    },
+    customChains: [
+      {
+        network: "base",
+        chainId: 8453,
+        urls: {
+          apiURL: "https://api.basescan.org/api",
+          browserURL: "https://basescan.org",
+        },
+      },
+      {
+        network: "baseSepolia",
+        chainId: 84532,
+        urls: {
+          apiURL: "https://api-sepolia.basescan.org/api",
+          browserURL: "https://sepolia.basescan.org",
+        },
+      },
+    ],
+  },
+  paths: {
+    sources: "./contracts",
+    tests: "./test",
+    cache: "./cache",
+    artifacts: "./artifacts",
+  },
+  mocha: {
+    timeout: 40000,
+  },
+};
