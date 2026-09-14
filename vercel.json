@@ -5,6 +5,5 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "installCommand": "npm ci --ignore-scripts",
-  "devCommand": "npm run dev",
-  "public": true
+  "devCommand": "npm run dev"
 }
