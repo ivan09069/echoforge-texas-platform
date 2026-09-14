@@ -50,3 +50,14 @@ not a comprehensive contract audit or validation of the pipeline business model.
 Tooling overrides pin patched `tmp`, `diff` and `serialize-javascript` releases.
 The verifier's transitive dependency still includes an upstream elliptic advisory.
 See the repository review for the measured scan and remaining limitations.
+
+## Frontend build repair
+
+The root project had Vite 8 paired with React plugin 4, whose peer range excludes
+Vite 8. A clean npm install reproduced ERESOLVE. The React plugin is now 6.1.1,
+which supports Vite 8, and the lockfile is refreshed. Unused wagmi, viem and React
+Query dependencies were removed; the app's ethers wallet integration is preserved.
+CI now checks the frontend independently from contract compilation and tests.
+
+The repaired root frontend builds with Node 24 and its final npm audit reports
+zero advisories. Vercel uses a frozen `npm ci --ignore-scripts` installation.

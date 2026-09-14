@@ -4,7 +4,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
-  "installCommand": "npm install",
+  "installCommand": "npm ci --ignore-scripts",
   "devCommand": "npm run dev",
   "public": true
 }
