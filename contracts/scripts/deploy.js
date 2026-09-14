@@ -1,10 +1,7 @@
 // Deploy PIPE Token to Base
 // Usage: npx hardhat run scripts/deploy.js --network base
 
-import hre from "hardhat";
-import { verifyContract } from "@nomicfoundation/hardhat-verify/verify";
-const connection = await hre.network.create();
-const { ethers } = connection;
+const hre = require("hardhat");
 
 async function main() {
   console.log("═══════════════════════════════════════════════════════════");
@@ -12,11 +9,11 @@ async function main() {
   console.log("═══════════════════════════════════════════════════════════");
   console.log("");
 
-  const [deployer] = await ethers.getSigners();
+  const [deployer] = await hre.ethers.getSigners();
   console.log("Deploying with account:", deployer.address);
   
-  const balance = await ethers.provider.getBalance(deployer.address);
-  console.log("Account balance:", ethers.formatEther(balance), "ETH");
+  const balance = await hre.ethers.provider.getBalance(deployer.address);
+  console.log("Account balance:", hre.ethers.formatEther(balance), "ETH");
   console.log("");
 
   // USDC on Base Mainnet: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
@@ -25,10 +22,10 @@ async function main() {
   const USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
   
   // Use testnet USDC for testing, mainnet for production
-  const isMainnet = connection.networkName === "base";
+  const isMainnet = hre.network.name === "base";
   const USDC_ADDRESS = isMainnet ? USDC_BASE_MAINNET : USDC_BASE_SEPOLIA;
   
-  console.log("Network:", connection.networkName);
+  console.log("Network:", hre.network.name);
   console.log("USDC Address:", USDC_ADDRESS);
   console.log("");
 
@@ -44,7 +41,7 @@ async function main() {
   // Deploy
   console.log("Deploying PipelineCapacityToken...");
   
-  const PipelineCapacityToken = await ethers.getContractFactory("PipelineCapacityToken");
+  const PipelineCapacityToken = await hre.ethers.getContractFactory("PipelineCapacityToken");
   const pipe = await PipelineCapacityToken.deploy(
     USDC_ADDRESS,
     INITIAL_CAPACITY_MCF,
@@ -64,8 +61,8 @@ async function main() {
   console.log("Contract Details:");
   console.log("- Name:", await pipe.name());
   console.log("- Symbol:", await pipe.symbol());
-  console.log("- Total Supply:", ethers.formatEther(await pipe.totalSupply()), "PIPE");
-  console.log("- Max Supply:", ethers.formatEther(await pipe.MAX_SUPPLY()), "PIPE");
+  console.log("- Total Supply:", hre.ethers.formatEther(await pipe.totalSupply()), "PIPE");
+  console.log("- Max Supply:", hre.ethers.formatEther(await pipe.MAX_SUPPLY()), "PIPE");
   console.log("");
 
   // Get pipeline stats
@@ -77,20 +74,20 @@ async function main() {
   console.log("");
 
   // Verify on BaseScan
-  if (isMainnet || connection.networkName === "baseSepolia") {
+  if (isMainnet || hre.network.name === "baseSepolia") {
     console.log("Waiting for block confirmations...");
     await pipe.deploymentTransaction().wait(5);
     
     console.log("Verifying contract on BaseScan...");
     try {
-      await verifyContract({
+      await hre.run("verify:verify", {
         address: pipeAddress,
-        constructorArgs: [
+        constructorArguments: [
           USDC_ADDRESS,
           INITIAL_CAPACITY_MCF,
           BASE_PRICE_PER_MCF
         ],
-      }, hre);
+      });
       console.log("Contract verified!");
     } catch (error) {
       console.log("Verification error:", error.message);
@@ -112,7 +109,7 @@ async function main() {
 
   // Save deployment info
   const deploymentInfo = {
-    network: connection.networkName,
+    network: hre.network.name,
     contractAddress: pipeAddress,
     deployer: deployer.address,
     usdcAddress: USDC_ADDRESS,
