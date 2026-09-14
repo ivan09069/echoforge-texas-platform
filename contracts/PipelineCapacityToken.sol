@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
@@ -28,7 +29,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * - Capacity booking system
  * - Compliance-ready transfer restrictions
  * 
- * Deployed on Base (Ethereum L2)
+ * Target network: Base. Verify any deployment separately before use.
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -69,6 +70,9 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
     // Revenue distribution
     uint256 public totalRevenueDistributed;
     uint256 public pendingRevenue;
+    // Refundable booking funds and funded reward liabilities are separate.
+    uint256 public bookingEscrow;
+    uint256 public rewardReserve;
     
     // Capacity booking
     struct CapacityBooking {
@@ -81,6 +85,7 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
     }
     
     mapping(uint256 => CapacityBooking) public bookings;
+    mapping(uint256 => uint256) public bookingPayments;
     uint256 public bookingCounter;
     uint256 public totalBookedCapacity;
     uint256 public baseCapacityPrice; // Price per MCF per day in USDC (6 decimals)
@@ -105,6 +110,7 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
     event RevenueDistributed(uint256 amount, uint256 totalStaked);
     event CapacityBooked(uint256 indexed bookingId, address indexed booker, uint256 capacityMCF, uint256 duration);
     event BookingCancelled(uint256 indexed bookingId);
+    event BookingSettled(uint256 indexed bookingId, uint256 revenue);
     event CapacityPriceUpdated(uint256 oldPrice, uint256 newPrice);
     event PipelineMetricsUpdated(uint256 totalCapacity, uint256 utilization);
     event AddressBlacklisted(address indexed account, bool status);
@@ -130,9 +136,11 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
         Ownable(msg.sender)
     {
         require(_revenueToken != address(0), "Invalid revenue token");
+        require(_revenueToken.code.length > 0, "Revenue token must be deployed");
         require(_initialCapacityMCF > 0, "Invalid capacity");
         
         revenueToken = IERC20Extended(_revenueToken);
+        require(revenueToken.decimals() == 6, "Revenue token must use 6 decimals");
         totalCapacityMCF = _initialCapacityMCF;
         baseCapacityPrice = _basePrice;
         
@@ -173,7 +181,7 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
         
         // Update stake info
         userStake.amount += amount;
-        userStake.rewardDebt = (userStake.amount * accRewardPerShare) / REWARD_PRECISION;
+        userStake.rewardDebt = Math.mulDiv(userStake.amount, accRewardPerShare, REWARD_PRECISION);
         userStake.stakedAt = block.timestamp;
         
         // Set lock period (extend if already locked)
@@ -207,7 +215,7 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
         
         // Update stake
         userStake.amount -= amount;
-        userStake.rewardDebt = (userStake.amount * accRewardPerShare) / REWARD_PRECISION;
+        userStake.rewardDebt = Math.mulDiv(userStake.amount, accRewardPerShare, REWARD_PRECISION);
         totalStaked -= amount;
         
         // Return tokens
@@ -225,7 +233,7 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
         uint256 pending = _pendingReward(msg.sender);
         require(pending > 0, "No rewards");
         
-        stakes[msg.sender].rewardDebt = (stakes[msg.sender].amount * accRewardPerShare) / REWARD_PRECISION;
+        stakes[msg.sender].rewardDebt = Math.mulDiv(stakes[msg.sender].amount, accRewardPerShare, REWARD_PRECISION);
         _safeRewardTransfer(msg.sender, pending);
         
         emit RewardsClaimed(msg.sender, pending);
@@ -244,16 +252,18 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
         
         uint256 accReward = accRewardPerShare;
         if (totalStaked > 0 && pendingRevenue > 0) {
-            accReward += (pendingRevenue * REWARD_PRECISION) / totalStaked;
+            accReward += Math.mulDiv(pendingRevenue, REWARD_PRECISION, totalStaked);
         }
         
-        return ((userStake.amount * accReward) / REWARD_PRECISION) - userStake.rewardDebt;
+        return Math.mulDiv(userStake.amount, accReward, REWARD_PRECISION) - userStake.rewardDebt;
     }
     
     function _updateRewards() internal {
         if (totalStaked == 0 || pendingRevenue == 0) return;
         
-        accRewardPerShare += (pendingRevenue * REWARD_PRECISION) / totalStaked;
+        uint256 increment = Math.mulDiv(pendingRevenue, REWARD_PRECISION, totalStaked);
+        if (increment == 0) return; // Keep small deposits pending until representable.
+        accRewardPerShare += increment;
         totalRevenueDistributed += pendingRevenue;
         
         emit RevenueDistributed(pendingRevenue, totalStaked);
@@ -262,12 +272,27 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
     }
     
     function _safeRewardTransfer(address to, uint256 amount) internal {
-        uint256 balance = revenueToken.balanceOf(address(this));
-        if (amount > balance) {
-            revenueToken.safeTransfer(to, balance);
-        } else {
-            revenueToken.safeTransfer(to, amount);
-        }
+        require(amount <= rewardReserve, "Insufficient reward reserve");
+        rewardReserve -= amount;
+        _payRevenue(to, amount);
+    }
+
+    function _collectRevenue(uint256 amount) internal {
+        uint256 beforeBalance = revenueToken.balanceOf(address(this));
+        revenueToken.safeTransferFrom(msg.sender, address(this), amount);
+        require(revenueToken.balanceOf(address(this)) == beforeBalance + amount,
+            "Unsupported revenue transfer");
+    }
+
+    function _payRevenue(address to, uint256 amount) internal {
+        // Callers remove the paid liability first; a failed transfer reverts
+        // all accounting changes instead of silently erasing unpaid rewards.
+        require(revenueToken.balanceOf(address(this)) >= bookingEscrow + rewardReserve + amount,
+            "Revenue reserves impaired");
+        uint256 recipientBefore = revenueToken.balanceOf(to);
+        revenueToken.safeTransfer(to, amount);
+        require(revenueToken.balanceOf(to) == recipientBefore + amount,
+            "Unsupported revenue transfer");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -278,11 +303,12 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
      * @dev Deposit revenue for distribution to stakers
      * @param amount Amount of USDC to deposit
      */
-    function depositRevenue(uint256 amount) external {
+    function depositRevenue(uint256 amount) external nonReentrant {
         require(amount > 0, "Cannot deposit 0");
         
-        revenueToken.safeTransferFrom(msg.sender, address(this), amount);
+        _collectRevenue(amount);
         pendingRevenue += amount;
+        rewardReserve += amount;
         
         emit RevenueDeposited(amount, block.timestamp);
     }
@@ -290,7 +316,7 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
     /**
      * @dev Trigger revenue distribution manually
      */
-    function distributeRevenue() external {
+    function distributeRevenue() external nonReentrant {
         _updateRewards();
     }
 
@@ -309,18 +335,21 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
         require(capacityMCF <= availableCapacity(), "Insufficient capacity");
         
         // Must hold tokens proportional to capacity being booked
-        uint256 requiredTokens = (capacityMCF * 10**18) / CAPACITY_PER_TOKEN;
+        // capacityMCF is whole MCF; PIPE balances and CAPACITY_PER_TOKEN
+        // each use 18 decimal places (one MCF requires four whole PIPE).
+        uint256 requiredTokens = Math.mulDiv(capacityMCF, 1e36, CAPACITY_PER_TOKEN);
         require(balanceOf(msg.sender) >= requiredTokens, "Insufficient PIPE tokens");
         
         // Calculate cost
         uint256 totalCost = capacityMCF * baseCapacityPrice * durationDays;
         
         // Collect payment
-        revenueToken.safeTransferFrom(msg.sender, address(this), totalCost);
-        pendingRevenue += totalCost;
+        _collectRevenue(totalCost);
+        bookingEscrow += totalCost;
         
         // Create booking
         uint256 bookingId = bookingCounter++;
+        bookingPayments[bookingId] = totalCost;
         bookings[bookingId] = CapacityBooking({
             booker: msg.sender,
             capacityMCF: capacityMCF,
@@ -351,21 +380,47 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
         // Calculate refund (pro-rated)
         uint256 remainingTime = booking.endTime - block.timestamp;
         uint256 totalDuration = booking.endTime - booking.startTime;
-        uint256 refund = (booking.capacityMCF * booking.pricePerMCF * remainingTime) / (1 days);
+        uint256 payment = bookingPayments[bookingId];
+        uint256 refund = Math.mulDiv(payment, remainingTime, totalDuration);
         
         // Apply 10% cancellation fee
-        refund = (refund * 90) / 100;
+        refund = Math.mulDiv(refund, 90, 100);
         
         booking.active = false;
         totalBookedCapacity -= booking.capacityMCF;
+        bookingEscrow -= payment;
+        delete bookingPayments[bookingId];
+        uint256 earned = payment - refund;
+        pendingRevenue += earned;
+        rewardReserve += earned;
         
         if (refund > 0) {
-            revenueToken.safeTransfer(msg.sender, refund);
+            _payRevenue(msg.sender, refund);
         }
         
         _updateUtilization();
         
         emit BookingCancelled(bookingId);
+    }
+
+    /**
+     * @dev Anyone can finalize an expired booking. Revenue is recognized only
+     * when the booking closes, so a refund is never spent as staking rewards.
+     * Expired capacity becomes available after this explicit settlement.
+     */
+    function settleBooking(uint256 bookingId) external nonReentrant {
+        CapacityBooking storage booking = bookings[bookingId];
+        require(booking.active, "Booking not active");
+        require(block.timestamp >= booking.endTime, "Booking not expired");
+        uint256 payment = bookingPayments[bookingId];
+        booking.active = false;
+        totalBookedCapacity -= booking.capacityMCF;
+        bookingEscrow -= payment;
+        delete bookingPayments[bookingId];
+        pendingRevenue += payment;
+        rewardReserve += payment;
+        _updateUtilization();
+        emit BookingSettled(bookingId, payment);
     }
     
     /**
@@ -430,12 +485,18 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
     }
     
     /**
-     * @dev Emergency withdraw (owner only)
+     * @dev Recover surplus assets only; booked/reward/staked funds are reserved.
      */
-    function emergencyWithdraw(address token, uint256 amount) external onlyOwner {
+    function emergencyWithdraw(address token, uint256 amount) external onlyOwner nonReentrant {
         if (token == address(0)) {
-            payable(owner()).transfer(amount);
+            (bool sent, ) = payable(owner()).call{value: amount}("");
+            require(sent, "ETH transfer failed");
+        } else if (token == address(revenueToken)) {
+            _payRevenue(owner(), amount);
         } else {
+            if (token == address(this)) {
+                require(balanceOf(address(this)) >= totalStaked + amount, "PIPE stake reserved");
+            }
             IERC20Extended(token).safeTransfer(owner(), amount);
         }
     }
@@ -543,10 +604,10 @@ contract PipelineCapacityToken is ERC20, ERC20Burnable, ERC20Permit, Ownable, Re
     }
     
     /**
-     * @dev Calculate capacity entitlement for token amount
+     * @dev Calculate whole-MCF entitlement from an 18-decimal PIPE amount.
      */
     function capacityEntitlement(uint256 tokenAmount) external pure returns (uint256) {
-        return (tokenAmount * CAPACITY_PER_TOKEN) / 10**18;
+        return Math.mulDiv(tokenAmount, CAPACITY_PER_TOKEN, 1e36);
     }
 
     // Allow contract to receive ETH
