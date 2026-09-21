@@ -34,16 +34,23 @@ chmod +x deploy.sh
 
 #### 1. Deploy PIPE Token Contract
 
+Deployment is fail-closed. Configure the target network RPC, signer,
+`ETHERSCAN_API_KEY`, and `OWNER_ADDRESS` for the multisig that must accept
+two-step ownership after verification. Base mainnet additionally requires
+`CONFIRM_BASE_MAINNET=DEPLOY_BASE_MAINNET`.
+
 ```bash
 cd contracts
 cp .env.example .env
-# Edit .env with your PRIVATE_KEY
+# Configure the required values in .env
 
-npm install
+npm ci --ignore-scripts
 npx hardhat run scripts/deploy.js --network baseSepolia
 ```
 
-Save the deployed contract address.
+The script validates the chain and canonical USDC contract, verifies the source,
+starts ownership transfer, and writes a local deployment manifest. The multisig
+must call `acceptOwnership` before the deployment is considered operational.
 
 #### 2. Update Frontend
 

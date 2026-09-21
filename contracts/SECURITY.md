@@ -46,7 +46,11 @@ forking, or external signing accounts. The npm lock pins Solidity 0.8.37;
 compilation does not download another compiler. OpenZeppelin is pinned to 5.6.1,
 and compiler and local EVM target Cancun. Hardhat 3 replaces the older toolchain.
 Deployment and verification need separate chain validation; the deployment script
-was syntax-checked only. Etherscan V2 verification uses `ETHERSCAN_API_KEY`.
+is restricted to Base Sepolia and Base, checks the live chain ID and canonical
+USDC interface, requires explicit RPC/signer/verifier/owner configuration, and
+fails if source verification fails. Base mainnet requires an additional explicit
+confirmation value. Successful runs start a two-step transfer to the configured
+multisig and write a deployment manifest; the multisig must still accept ownership.
 
 Fourteen tests cover escrow/reward separation, decimals, expiry, withdrawal limits,
 proration, two stakers, underfunding, transfer fees and rollback. Five regressions

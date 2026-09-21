@@ -7,5 +7,6 @@ dist/
 contracts/artifacts/
 contracts/cache/
 contracts/node_modules/
+contracts/deployments/
 contracts/typechain-types/
 contracts/types/
