@@ -89,7 +89,7 @@ claimRewards()                           // Claim USDC rewards
 
 **Capacity Booking**
 ```solidity
-bookCapacity(uint256 capacityMCF, uint256 durationDays)
+bookCapacity(uint256 capacityMCF, uint256 durationDays, uint256 maxTotalCost, uint256 deadline)
 cancelBooking(uint256 bookingId)
 ```
 
@@ -156,7 +156,7 @@ echoforge-full/
 
 ## Next Steps
 
-1. **Testnet**: Deploy to Base Sepolia, test all functions
+1. **Testnet**: Deploy to Base Sepolia, test all functions and transfer ownership to a multisig
 2. **Security Audit**: Review contract before mainnet
 3. **Mainnet**: Deploy to Base mainnet
 4. **Real Data**: Integrate ERCOT API (requires account)

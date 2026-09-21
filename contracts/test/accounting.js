@@ -23,8 +23,9 @@ describe('Capacity accounting on an isolated EVM', function () {
   });
   async function book(capacity = 10, days = 10) {
     const id = await pipe.bookingCounter();
-    await pipe.connect(booker).bookCapacity(capacity, days);
-    return { id, booking: await pipe.getBooking(id), payment: BigInt(capacity * days) * USD };
+    const payment = BigInt(capacity * days) * USD;
+    await pipe.connect(booker).bookCapacity(capacity, days, payment, ethers.MaxUint256);
+    return { id, booking: await pipe.getBooking(id), payment };
   }
   async function next(timestamp) { await provider.send('evm_setNextBlockTimestamp', [Number(timestamp)]); }
   async function solvent() {
@@ -41,7 +42,7 @@ describe('Capacity accounting on an isolated EVM', function () {
     await pipe.transfer(outsider.address, 4);
     await revenue.mint(outsider.address, USD);
     await revenue.connect(outsider).approve(address, USD);
-    await expect(pipe.connect(outsider).bookCapacity(1, 1)).to.be.revertedWith('Insufficient PIPE tokens');
+    await expect(pipe.connect(outsider).bookCapacity(1, 1, USD, ethers.MaxUint256)).to.be.revertedWith('Insufficient PIPE tokens');
   });
   it('uses whole MCF consistently for token entitlements', async () => {
     expect(await pipe.capacityEntitlement(4n * PIPE)).to.equal(1);
@@ -107,7 +108,7 @@ describe('Capacity accounting on an isolated EVM', function () {
   it('rejects underfunded fee-on-transfer deposits and bookings atomically', async () => {
     await revenue.setFee(100);
     await expect(pipe.depositRevenue(100n * USD)).to.be.revertedWith('Unsupported revenue transfer');
-    await expect(pipe.connect(booker).bookCapacity(10, 10)).to.be.revertedWith('Unsupported revenue transfer');
+    await expect(pipe.connect(booker).bookCapacity(10, 10, 100n * USD, ethers.MaxUint256)).to.be.revertedWith('Unsupported revenue transfer');
     expect(await pipe.pendingRevenue()).to.equal(0);
     expect(await pipe.bookingCounter()).to.equal(0);
     expect(await revenue.balanceOf(address)).to.equal(0);
@@ -153,5 +154,55 @@ describe('Capacity accounting on an isolated EVM', function () {
     expect(await pipe.totalBookedCapacity()).to.equal(0);
     expect(await pipe.bookingEscrow()).to.equal(0);
     expect(await pipe.rewardReserve()).to.equal(0);
+  });
+
+  it('escrows booking rights so the same PIPE cannot back multiple bookings', async () => {
+    const { id } = await book(10, 10);
+    expect(await pipe.bookingTokenEscrow(id)).to.equal(40n * PIPE);
+    expect(await pipe.totalBookingTokenEscrow()).to.equal(40n * PIPE);
+    expect(await pipe.balanceOf(booker.address)).to.equal(60n * PIPE);
+    await expect(
+      pipe.connect(booker).bookCapacity(20, 1, 20n * USD, ethers.MaxUint256)
+    ).to.be.revertedWith('Insufficient PIPE tokens');
+    await pipe.connect(booker).cancelBooking(id);
+    expect(await pipe.balanceOf(booker.address)).to.equal(100n * PIPE);
+    expect(await pipe.totalBookingTokenEscrow()).to.equal(0);
+  });
+
+  it('enforces booking price and deadline limits', async () => {
+    await expect(
+      pipe.connect(booker).bookCapacity(10, 10, 99n * USD, ethers.MaxUint256)
+    ).to.be.revertedWith('Price exceeds limit');
+    await expect(
+      pipe.connect(booker).bookCapacity(10, 10, 100n * USD, 1)
+    ).to.be.revertedWith('Booking expired');
+  });
+
+  it('pauses new risk while keeping cancellation and unstaking exits open', async () => {
+    const { id } = await book();
+    await pipe.pause();
+    await expect(pipe.connect(booker).bookCapacity(1, 1, USD, ethers.MaxUint256))
+      .to.be.revertedWithCustomError(pipe, 'EnforcedPause');
+    await expect(pipe.depositRevenue(USD)).to.be.revertedWithCustomError(pipe, 'EnforcedPause');
+    await expect(pipe.transfer(outsider.address, PIPE)).to.be.revertedWithCustomError(pipe, 'EnforcedPause');
+    await pipe.connect(booker).cancelBooking(id);
+    await next((await pipe.stakes(staker.address)).lockUntil);
+    await pipe.connect(staker).unstake(100n * PIPE);
+  });
+
+  it('uses two-step ownership transfer', async () => {
+    await pipe.transferOwnership(outsider.address);
+    expect(await pipe.owner()).to.equal(owner.address);
+    expect(await pipe.pendingOwner()).to.equal(outsider.address);
+    await pipe.connect(outsider).acceptOwnership();
+    expect(await pipe.owner()).to.equal(outsider.address);
+  });
+
+  it('requires both parties to be whitelisted for direct restricted transfers', async () => {
+    await pipe.setTransferRestricted(true);
+    await pipe.setWhitelist(owner.address, true);
+    await expect(pipe.transfer(outsider.address, PIPE)).to.be.revertedWith('Transfer restricted');
+    await pipe.setWhitelist(outsider.address, true);
+    await pipe.transfer(outsider.address, PIPE);
   });
 });
