@@ -21,15 +21,16 @@ import "@openzeppelin/contracts/utils/math/Math.sol";
  * 
  * By Ivan Torres / EchoForge Studios
  * 
- * This token represents fractional ownership of Permian Basin pipeline capacity
- * rights, with automated revenue distribution from pipeline usage fees.
+ * Prototype software for capacity booking and reward-accounting research. Source
+ * code alone does not create legal ownership, investment, pipeline or revenue
+ * rights. Production use requires separate technical, operational and legal review.
  * 
  * Features:
  * - ERC-20 compliant tokenized pipeline capacity
  * - Staking mechanism with USDC rewards
  * - Automated revenue distribution
  * - Capacity booking system
- * - Compliance-ready transfer restrictions
+ * - Administrator-configurable transfer restrictions (not a compliance determination)
  * 
  * Target network: Base. Verify any deployment separately before use.
  * ═══════════════════════════════════════════════════════════════════════════════

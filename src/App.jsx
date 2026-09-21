@@ -657,7 +657,7 @@ export default function App() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-2xl font-bold text-purple-400">Tokenized Permian Basin Pipeline Rights</p>
-                  <p className="text-white/40 mt-1">Fractional ownership with automated USDC revenue distribution</p>
+                  <p className="text-white/40 mt-1">Prototype capacity-booking and USDC reward accounting</p>
                   <p className="text-xs text-white/30 mt-2 font-mono">Contract: {CONTRACTS.PIPE.slice(0, 10)}... (Base Sepolia)</p>
                 </div>
                 <div className="text-6xl">🛢️</div>
