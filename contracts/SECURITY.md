@@ -18,7 +18,13 @@ or replacement; do not assume a Git merge updates its bytecode or balances.
 - Revenue is recognized at closure, not progressively during active bookings.
   Reward rounding dust stays reserved conservatively; there is no dust sweep.
 - PIPE has 18 decimals; MCF quantities are whole units. Four whole PIPE entitle a
-  holder to one MCF. The old wei-scale booking threshold was incorrect.
+  holder to one MCF. Required PIPE is escrowed for the booking lifetime so the
+  same tokens cannot reserve capacity more than once.
+- Bookings include a caller-selected maximum cost and execution deadline.
+- Ownership transfer is two-step. Production ownership should be accepted by a
+  reviewed multisig rather than an individual deployer account.
+- Emergency pause blocks new stakes, deposits, bookings and direct holder
+  transfers while leaving claims, cancellations, settlements and unstaking open.
 - Revenue tokens require deployed code and six decimals. Collection and payouts
   check exact received balances; fee-on-transfer tokens are unsupported.
   External freezes, confiscation or rebasing can still stop payments, but failed

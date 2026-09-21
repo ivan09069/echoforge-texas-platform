@@ -28,7 +28,7 @@ const PIPE_ABI = [
   'function getStakeInfo(address user) view returns (uint256, uint256, uint256, uint256)',
   'function getStakingStats() view returns (uint256, uint256, uint256, uint256)',
   'function getPipelineStats() view returns (uint256, uint256, uint256, uint256, uint256)',
-  'function bookCapacity(uint256 capacityMCF, uint256 durationDays) external returns (uint256)',
+  'function bookCapacity(uint256 capacityMCF, uint256 durationDays, uint256 maxTotalCost, uint256 deadline) external returns (uint256)',
   'event Staked(address indexed user, uint256 amount, uint256 lockUntil)',
   'event RewardsClaimed(address indexed user, uint256 amount)',
 ];
