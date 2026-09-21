@@ -4,13 +4,18 @@
 
 **By Ivan Torres / EchoForge Studios**
 
+> **Pre-production prototype.** The repository has not completed an independent
+> smart-contract audit, legal review, production deployment rehearsal, or
+> operational approval. It must not accept user funds or represent deployed
+> pipeline, ownership, investment, or revenue rights.
+
 ---
 
 ## Overview
 
 Full-stack energy trading platform combining:
 - Natural gas well operations → Power generation → Bitcoin mining → Renewable reinvestment
-- PIPE Token: ERC-20 tokenized pipeline capacity rights with staking rewards
+- PIPE Token: prototype ERC-20 capacity-booking and reward accounting model
 - Live crypto prices from CoinGecko
 - ERCOT grid monitoring
 - Web3 wallet integration (MetaMask)
@@ -110,7 +115,7 @@ cancelBooking(uint256 bookingId)
 ## Frontend Features
 
 - **Overview**: Bootstrap model visualization, portfolio summary
-- **Wells**: Real-time production monitoring, efficiency tracking
+- **Wells**: Simulated production-monitoring and efficiency dashboards
 - **Crypto**: Live prices (CoinGecko), portfolio allocation
 - **Pipeline**: PIPE token staking, capacity management
 - **ERCOT**: Grid status, renewable output, curtailment alerts
@@ -165,7 +170,7 @@ echoforge-full/
 
 1. **Testnet**: Deploy to Base Sepolia, test all functions and transfer ownership to a multisig
 2. **Security Audit**: Review contract before mainnet
-3. **Mainnet**: Deploy to Base mainnet
+3. **Mainnet**: Keep blocked until every gate in `PRODUCTION_READINESS.md` is complete
 4. **Real Data**: Integrate ERCOT API (requires account)
 5. **Features**: Add trading, governance, multi-sig
 
