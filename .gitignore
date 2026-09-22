@@ -10,3 +10,15 @@ contracts/node_modules/
 contracts/deployments/
 contracts/typechain-types/
 contracts/types/
+
+# Credentials
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+credentials.json
+__pycache__/
