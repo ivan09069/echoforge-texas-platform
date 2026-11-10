@@ -8,10 +8,33 @@ import { ethers } from 'ethers';
 // By Ivan Torres / EchoForge Studios
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Contract addresses (Base Sepolia testnet)
+// Network & Contract Registry (Base Mainnet 8453 + Base Sepolia 84532)
+const NETWORKS = {
+  8453: {
+    chainId: '0x2105',
+    chainIdDec: 8453,
+    chainName: 'Base Mainnet',
+    PIPE: import.meta.env?.VITE_BASE_PIPE_ADDRESS || '0xf142c0860a068001db0dd616d5f7dc7abb9d0d17',
+    USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    rpcUrls: ['https://mainnet.base.org', 'https://base-rpc.publicnode.com'],
+    blockExplorerUrls: ['https://basescan.org'],
+    nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+  },
+  84532: {
+    chainId: '0x14a34',
+    chainIdDec: 84532,
+    chainName: 'Base Sepolia',
+    PIPE: import.meta.env?.VITE_SEPOLIA_PIPE_ADDRESS || '0xf142c0860a068001db0dd616d5f7dc7abb9d0d17',
+    USDC: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    rpcUrls: ['https://sepolia.base.org', 'https://base-sepolia-rpc.publicnode.com'],
+    blockExplorerUrls: ['https://sepolia.basescan.org'],
+    nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+  },
+};
+
 const CONTRACTS = {
-  PIPE: '0x0000000000000000000000000000000000000000', // Will be updated after deployment
-  USDC: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', // Base Sepolia USDC
+  PIPE: NETWORKS[8453].PIPE,
+  USDC: NETWORKS[8453].USDC,
 };
 
 // PIPE Token ABI (simplified for frontend)
@@ -27,6 +50,11 @@ const PIPE_ABI = [
   'function pendingRewards(address user) view returns (uint256)',
   'function getStakeInfo(address user) view returns (uint256, uint256, uint256, uint256)',
   'function getStakingStats() view returns (uint256, uint256, uint256, uint256)',
+  'function totalStaked() view returns (uint256)',
+  'function totalCapacityMCF() view returns (uint256)',
+  'function availableCapacity() view returns (uint256)',
+  'function baseCapacityPrice() view returns (uint256)',
+  'function capacityEntitlement(uint256 tokenAmount) pure returns (uint256)',
   'function getPipelineStats() view returns (uint256, uint256, uint256, uint256, uint256)',
   'function bookCapacity(uint256 capacityMCF, uint256 durationDays, uint256 maxTotalCost, uint256 deadline) external returns (uint256)',
   'event Staked(address indexed user, uint256 amount, uint256 lockUntil)',
@@ -136,19 +164,29 @@ const useWallet = () => {
       setChainId(Number(network.chainId));
       setError(null);
 
-      // Switch to Base Sepolia if not on it
-      if (Number(network.chainId) !== 84532) {
+      // Default to Base Mainnet (8453) if connected to an unsupported network
+      const netId = Number(network.chainId);
+      if (netId !== 8453 && netId !== 84532) {
+        const targetNet = NETWORKS[8453];
         try {
           await window.ethereum.request({
             method: 'wallet_switchEthereumChain',
-            params: [{ chainId: BASE_SEPOLIA.chainId }],
+            params: [{ chainId: targetNet.chainId }],
           });
+          setChainId(8453);
         } catch (switchError) {
           if (switchError.code === 4902) {
             await window.ethereum.request({
               method: 'wallet_addEthereumChain',
-              params: [BASE_SEPOLIA],
+              params: [{
+                chainId: targetNet.chainId,
+                chainName: targetNet.chainName,
+                nativeCurrency: targetNet.nativeCurrency,
+                rpcUrls: targetNet.rpcUrls,
+                blockExplorerUrls: targetNet.blockExplorerUrls,
+              }],
             });
+            setChainId(8453);
           }
         }
       }
@@ -306,8 +344,13 @@ export default function App() {
   const ercot = useErcotData();
   const wallet = useWallet();
 
-  // Portfolio data (would come from contract in production)
-  const [portfolio] = useState({
+  const activeChainId = wallet.chainId === 84532 ? 84532 : 8453;
+  const activeNet = NETWORKS[activeChainId];
+  const [txStatus, setTxStatus] = useState(null);
+  const [onChainLive, setOnChainLive] = useState(false);
+
+  // Portfolio data (hydrated from Base on-chain state when available)
+  const [portfolio, setPortfolio] = useState({
     btc_balance: 4.084,
     eth_balance: 24.7,
     sol_balance: 312,
@@ -317,7 +360,7 @@ export default function App() {
     pipe_pending_rewards: 847.50,
   });
 
-  const [pipeline] = useState({
+  const [pipeline, setPipeline] = useState({
     token_price: 14.80,
     total_supply: 100000,
     total_staked: 45000,
@@ -325,7 +368,101 @@ export default function App() {
     volume_24h: 584000,
     apy: 18.4,
     your_capacity: 2125, // MCF
+    total_capacity_mcf: 25000,
+    available_mcf: 18500,
+    price_per_mcf: 0.50,
   });
+
+  const syncOnChainData = useCallback(async () => {
+    for (const rpc of activeNet.rpcUrls) {
+      try {
+        const rpcProvider = new ethers.JsonRpcProvider(rpc, activeNet.chainIdDec);
+        const code = await rpcProvider.getCode(activeNet.PIPE);
+        if (!code || code === '0x') continue;
+
+        const pipeContract = new ethers.Contract(activeNet.PIPE, PIPE_ABI, rpcProvider);
+        const [rawSupply, rawStaked] = await Promise.all([
+          pipeContract.totalSupply().catch(() => null),
+          pipeContract.totalStaked().catch(() => null),
+        ]);
+
+        const pipeStats = await pipeContract.getPipelineStats().catch(() => null);
+
+        setPipeline(prev => ({
+          ...prev,
+          total_supply: rawSupply !== null ? Number(ethers.formatUnits(rawSupply, 18)) : prev.total_supply,
+          total_staked: rawStaked !== null ? Number(ethers.formatUnits(rawStaked, 18)) : prev.total_staked,
+          total_capacity_mcf: pipeStats ? Number(pipeStats[0]) : prev.total_capacity_mcf,
+          available_mcf: pipeStats ? Number(pipeStats[2]) : prev.available_mcf,
+          price_per_mcf: pipeStats ? Number(pipeStats[4]) / 1e6 : prev.price_per_mcf,
+        }));
+        setOnChainLive(true);
+
+        if (wallet.account) {
+          const usdcContract = new ethers.Contract(
+            activeNet.USDC,
+            ['function balanceOf(address) view returns (uint256)'],
+            rpcProvider
+          );
+          const [ethBal, pipeBal, usdcBal, stakeInfo, pending] = await Promise.all([
+            rpcProvider.getBalance(wallet.account).catch(() => null),
+            pipeContract.balanceOf(wallet.account).catch(() => null),
+            usdcContract.balanceOf(wallet.account).catch(() => null),
+            pipeContract.getStakeInfo(wallet.account).catch(() => null),
+            pipeContract.pendingRewards(wallet.account).catch(() => null),
+          ]);
+
+          const userPipe = pipeBal !== null ? Number(ethers.formatUnits(pipeBal, 18)) : null;
+          const userStaked = stakeInfo ? Number(ethers.formatUnits(stakeInfo[0], 18)) : null;
+
+          setPortfolio(prev => ({
+            ...prev,
+            eth_balance: ethBal !== null ? Number(Number(ethers.formatEther(ethBal)).toFixed(4)) : prev.eth_balance,
+            usdc_balance: usdcBal !== null ? Number(ethers.formatUnits(usdcBal, 6)) : prev.usdc_balance,
+            pipe_balance: userPipe !== null ? userPipe : prev.pipe_balance,
+            pipe_staked: userStaked !== null ? userStaked : prev.pipe_staked,
+            pipe_pending_rewards: pending !== null ? Number(ethers.formatUnits(pending, 6)) : prev.pipe_pending_rewards,
+          }));
+
+          if (userPipe !== null) {
+            setPipeline(prev => ({
+              ...prev,
+              your_capacity: Math.floor((userPipe + (userStaked || 0)) * 0.25),
+            }));
+          }
+        }
+        break;
+      } catch (err) {
+        // Fallback to next RPC in activeNet.rpcUrls
+      }
+    }
+  }, [activeNet, wallet.account]);
+
+  useEffect(() => {
+    syncOnChainData();
+    const id = setInterval(syncOnChainData, 20000);
+    return () => clearInterval(id);
+  }, [syncOnChainData]);
+
+  const executePipeTx = useCallback(async (actionLabel, fnCall) => {
+    if (!wallet.signer) {
+      await wallet.connect();
+      return;
+    }
+    try {
+      setTxStatus(`Submitting ${actionLabel}...`);
+      const contract = new ethers.Contract(activeNet.PIPE, PIPE_ABI, wallet.signer);
+      const tx = await fnCall(contract);
+      setTxStatus(`Confirming ${tx.hash.slice(0, 10)}...`);
+      await tx.wait();
+      setTxStatus(`Confirmed: ${actionLabel}`);
+      await syncOnChainData();
+      setTimeout(() => setTxStatus(null), 5000);
+    } catch (err) {
+      setTxStatus(`Error: ${err.shortMessage || err.message}`);
+      setTimeout(() => setTxStatus(null), 6000);
+    }
+  }, [wallet, activeNet, syncOnChainData]);
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -491,7 +628,7 @@ export default function App() {
               <span className="text-amber-400">${portfolio.pipe_pending_rewards.toFixed(2)}</span>
             </div>
             <button 
-              onClick={() => wallet.account ? alert('Claiming rewards...') : wallet.connect()}
+              onClick={() => wallet.account ? executePipeTx('Claim Rewards', c => c.claimRewards()) : wallet.connect()}
               className="w-full py-3 bg-purple-600 hover:bg-purple-500 rounded-lg font-bold transition"
             >
               {wallet.account ? 'Claim Rewards' : 'Connect to Claim'}
@@ -658,7 +795,7 @@ export default function App() {
                 <div>
                   <p className="text-2xl font-bold text-purple-400">Tokenized Permian Basin Pipeline Rights</p>
                   <p className="text-white/40 mt-1">Prototype capacity-booking and USDC reward accounting</p>
-                  <p className="text-xs text-white/30 mt-2 font-mono">Contract: {CONTRACTS.PIPE.slice(0, 10)}... (Base Sepolia)</p>
+                  <p className="text-xs text-white/30 mt-2 font-mono">Contract: {activeNet.PIPE.slice(0, 10)}... ({activeNet.chainName} {onChainLive ? '• ON-CHAIN SYNCED' : '• SIMULATED'})</p>
                 </div>
                 <div className="text-6xl">🛢️</div>
               </div>
@@ -697,13 +834,27 @@ export default function App() {
                   <p className="text-xs text-emerald-400">Connected</p>
                   <p className="text-xs font-mono text-white/60 mt-1">{wallet.account.slice(0, 8)}...{wallet.account.slice(-6)}</p>
                 </div>
-                <button className="w-full py-4 bg-purple-600 hover:bg-purple-500 rounded-xl font-bold transition">
+                {txStatus && (
+                  <div className="p-2.5 bg-purple-950/50 border border-purple-500/40 rounded-lg text-center text-xs text-purple-300 font-mono">
+                    {txStatus}
+                  </div>
+                )}
+                <button
+                  onClick={() => executePipeTx('Stake 100 PIPE (7d)', c => c.stake(ethers.parseUnits('100', 18), 7))}
+                  className="w-full py-4 bg-purple-600 hover:bg-purple-500 rounded-xl font-bold transition"
+                >
                   Stake PIPE
                 </button>
-                <button className="w-full py-4 bg-white/10 hover:bg-white/20 rounded-xl font-bold transition">
+                <button
+                  onClick={() => executePipeTx('Unstake 100 PIPE', c => c.unstake(ethers.parseUnits('100', 18)))}
+                  className="w-full py-4 bg-white/10 hover:bg-white/20 rounded-xl font-bold transition"
+                >
                   Unstake PIPE
                 </button>
-                <button className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold transition">
+                <button
+                  onClick={() => executePipeTx('Claim Rewards', c => c.claimRewards())}
+                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold transition"
+                >
                   Claim ${portfolio.pipe_pending_rewards.toFixed(2)}
                 </button>
               </>
@@ -870,7 +1021,7 @@ export default function App() {
           "DRILL 1 WELL → BOOTSTRAP CRYPTO → REINVEST RENEWABLES"
         </p>
         <p className="text-[10px] text-white/10 mt-1">
-          Base Sepolia • Contract: {CONTRACTS.PIPE}
+          {activeNet.chainName} ({activeNet.chainIdDec}) • PIPE: {activeNet.PIPE} • USDC: {activeNet.USDC}
         </p>
       </footer>
     </div>
