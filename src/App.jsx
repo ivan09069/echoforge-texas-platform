@@ -344,10 +344,41 @@ export default function App() {
   const ercot = useErcotData();
   const wallet = useWallet();
 
-  const activeChainId = wallet.chainId === 84532 ? 84532 : 8453;
+  const [preferredChain, setPreferredChain] = useState(8453);
+  const activeChainId = wallet.chainId === 8453 || wallet.chainId === 84532 ? wallet.chainId : preferredChain;
   const activeNet = NETWORKS[activeChainId];
   const [txStatus, setTxStatus] = useState(null);
   const [onChainLive, setOnChainLive] = useState(false);
+  const [stakeAmountInput, setStakeAmountInput] = useState('100');
+  const [stakeLockDays, setStakeLockDays] = useState('7');
+  const [bookMcfInput, setBookMcfInput] = useState('500');
+  const [bookDaysInput, setBookDaysInput] = useState('30');
+
+  const handleSwitchChain = useCallback(async (targetId) => {
+    setPreferredChain(targetId);
+    if (window.ethereum && wallet.account) {
+      const targetNet = NETWORKS[targetId];
+      try {
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: targetNet.chainId }],
+        });
+      } catch (switchError) {
+        if (switchError.code === 4902) {
+          await window.ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: targetNet.chainId,
+              chainName: targetNet.chainName,
+              nativeCurrency: targetNet.nativeCurrency,
+              rpcUrls: targetNet.rpcUrls,
+              blockExplorerUrls: targetNet.blockExplorerUrls,
+            }],
+          });
+        }
+      }
+    }
+  }, [wallet.account]);
 
   // Portfolio data (hydrated from Base on-chain state when available)
   const [portfolio, setPortfolio] = useState({
@@ -839,23 +870,88 @@ export default function App() {
                     {txStatus}
                   </div>
                 )}
-                <button
-                  onClick={() => executePipeTx('Stake 100 PIPE (7d)', c => c.stake(ethers.parseUnits('100', 18), 7))}
-                  className="w-full py-4 bg-purple-600 hover:bg-purple-500 rounded-xl font-bold transition"
-                >
-                  Stake PIPE
-                </button>
-                <button
-                  onClick={() => executePipeTx('Unstake 100 PIPE', c => c.unstake(ethers.parseUnits('100', 18)))}
-                  className="w-full py-4 bg-white/10 hover:bg-white/20 rounded-xl font-bold transition"
-                >
-                  Unstake PIPE
-                </button>
+                <div className="p-3 bg-black/40 border border-white/10 rounded-xl space-y-2">
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className="text-[10px] text-white/40 uppercase">PIPE Amount</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={stakeAmountInput}
+                        onChange={e => setStakeAmountInput(e.target.value)}
+                        className="w-full mt-1 px-2.5 py-1.5 bg-black/60 border border-white/15 rounded text-sm text-white font-mono"
+                      />
+                    </div>
+                    <div className="w-24">
+                      <label className="text-[10px] text-white/40 uppercase">Lock Days</label>
+                      <input
+                        type="number"
+                        min="7"
+                        value={stakeLockDays}
+                        onChange={e => setStakeLockDays(e.target.value)}
+                        className="w-full mt-1 px-2.5 py-1.5 bg-black/60 border border-white/15 rounded text-sm text-white font-mono"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => executePipeTx(`Stake ${stakeAmountInput} PIPE (${stakeLockDays}d)`, c => c.stake(ethers.parseUnits(stakeAmountInput || '0', 18), Math.max(7, Number(stakeLockDays) || 7)))}
+                      className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-500 rounded-lg text-xs font-bold transition"
+                    >
+                      Stake PIPE
+                    </button>
+                    <button
+                      onClick={() => executePipeTx(`Unstake ${stakeAmountInput} PIPE`, c => c.unstake(ethers.parseUnits(stakeAmountInput || '0', 18)))}
+                      className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-bold transition"
+                    >
+                      Unstake
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-black/40 border border-blue-500/20 rounded-xl space-y-2">
+                  <p className="text-[10px] text-blue-400 uppercase tracking-wider font-bold">Book Pipeline Capacity</p>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className="text-[10px] text-white/40 uppercase">Capacity (MCF)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={bookMcfInput}
+                        onChange={e => setBookMcfInput(e.target.value)}
+                        className="w-full mt-1 px-2.5 py-1.5 bg-black/60 border border-white/15 rounded text-sm text-white font-mono"
+                      />
+                    </div>
+                    <div className="w-24">
+                      <label className="text-[10px] text-white/40 uppercase">Days</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={bookDaysInput}
+                        onChange={e => setBookDaysInput(e.target.value)}
+                        className="w-full mt-1 px-2.5 py-1.5 bg-black/60 border border-white/15 rounded text-sm text-white font-mono"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const mcf = BigInt(Math.max(1, Number(bookMcfInput) || 1));
+                      const days = BigInt(Math.max(1, Number(bookDaysInput) || 1));
+                      const maxCost = mcf * days * 1000000n; // $1.00/MCF/day slippage cap (6 dec)
+                      const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
+                      executePipeTx(`Book ${mcf} MCF (${days}d)`, c => c.bookCapacity(mcf, days, maxCost, deadline));
+                    }}
+                    className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-xs font-bold transition"
+                  >
+                    Book {bookMcfInput} MCF • Est. ${((Number(bookMcfInput) || 0) * (Number(bookDaysInput) || 0) * pipeline.price_per_mcf).toLocaleString()} USDC
+                  </button>
+                </div>
+
                 <button
                   onClick={() => executePipeTx('Claim Rewards', c => c.claimRewards())}
-                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold transition"
+                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-sm font-bold transition"
                 >
-                  Claim ${portfolio.pipe_pending_rewards.toFixed(2)}
+                  Claim ${portfolio.pipe_pending_rewards.toFixed(2)} USDC
                 </button>
               </>
             )}
@@ -974,9 +1070,24 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-6">
+            <div className="flex items-center bg-white/5 border border-white/10 rounded-lg p-0.5">
+              {[8453, 84532].map(id => (
+                <button
+                  key={id}
+                  onClick={() => handleSwitchChain(id)}
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase transition ${
+                    activeChainId === id
+                      ? 'bg-purple-600 text-white'
+                      : 'text-white/40 hover:text-white/70'
+                  }`}
+                >
+                  {id === 8453 ? 'Base 8453' : 'Sepolia 84532'}
+                </button>
+              ))}
+            </div>
             <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-full">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-emerald-400 text-xs font-medium">LIVE</span>
+              <span className="text-emerald-400 text-xs font-medium">{onChainLive ? 'ON-CHAIN LIVE' : 'LIVE'}</span>
             </div>
             <div className="text-white/60 text-sm">
               {time.toLocaleTimeString('en-US', { hour12: false })} <span className="text-white/30">CST</span>

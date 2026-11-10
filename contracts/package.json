@@ -14,7 +14,8 @@
     "clean": "hardhat clean",
     "coverage": "hardhat test --config hardhat.security.config.js --coverage",
     "test:security": "hardhat test --config hardhat.security.config.js",
-    "postinstall": "node scripts/patch-android-hardhat.cjs"
+    "postinstall": "node scripts/patch-android-hardhat.cjs",
+    "compile:wasm": "node scripts/compile-wasm.mjs"
   },
   "devDependencies": {
     "@openzeppelin/contracts": "5.6.1",
